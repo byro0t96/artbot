@@ -1,4 +1,4 @@
-# workflow-version: 1.0.1
+# workflow-version: 1.0.2-beta
 name: Enhanced Repository Analysis
 
 on:
@@ -20,7 +20,7 @@ on:
         type: string
 
 env:
-  WORKFLOW_VERSION: "1.0.1"
+  WORKFLOW_VERSION: "1.0.2-beta"
 
 jobs:
   analyze:
