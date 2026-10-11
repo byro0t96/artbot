@@ -1,4 +1,4 @@
-# workflow-version: 1.0.4-beta
+# workflow-version: 1.0.6-beta
 name: Enhanced Repository Analysis
 
 on:
@@ -20,7 +20,7 @@ on:
         type: string
 
 env:
-  WORKFLOW_VERSION: "1.0.4-beta"
+  WORKFLOW_VERSION: "1.0.6-beta"
 
 jobs:
   analyze:
@@ -112,12 +112,22 @@ jobs:
           fi
           echo "🔐 Local workflow hash: $WORKFLOW_HASH"
 
+          # ---- Smart scanning: fingerprint of the whole repository ----
+          # `git rev-parse HEAD^{tree}` is the hash of every file's content
+          # and path in this checkout. It's computed by git in milliseconds
+          # WITHOUT reading the files, so the server can answer "nothing
+          # changed since the last scan" before we download or run anything.
+          TREE_HASH=$(git rev-parse "HEAD^{tree}" 2>/dev/null || echo "")
+          echo "🌳 Repository tree hash: ${TREE_HASH:-unknown}"
+
           HTTP_CODE=$(curl -L -X GET "$BASE_URL/webhook/status" \
             -H "Accept: application/json" \
             -H "X-API-Token: $WEBHOOK_API_TOKEN" \
             -H "X-Repository: ${{ github.repository }}" \
             -H "X-Workflow-Version: $WORKFLOW_VERSION" \
             -H "X-Workflow-Hash: $WORKFLOW_HASH" \
+            -H "X-Tree-Hash: $TREE_HASH" \
+            -H "X-Event-Name: ${{ github.event_name }}" \
             -H "X-Ref-Name: $GH_REF_NAME" \
             -H "X-Commit-SHA: $GH_COMMIT_SHA" \
             -H "X-Run-ID: ${{ github.run_id }}" \
@@ -142,8 +152,9 @@ jobs:
             exit 0
           fi
 
-          INTEGRITY=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('workflow_integrity') or '')" "$RUNNER_TEMP/status.json" 2>/dev/null || echo "")
+          IFS='|' read -r INTEGRITY DECISION <<< "$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print((d.get('workflow_integrity') or '') + '|' + (d.get('scan_decision') or ''))" "$RUNNER_TEMP/status.json" 2>/dev/null || echo "|")"
           echo "🛡️ Workflow integrity: ${INTEGRITY:-unknown}"
+          echo "🧠 Scan decision: ${DECISION:-scan}"
 
           if [ "$INTEGRITY" = "restored" ] || [ "$INTEGRITY" = "restore_failed" ] || [ "$INTEGRITY" = "tampered" ]; then
             # The .yml in this repo differs from the official one.
@@ -152,6 +163,13 @@ jobs:
             # from the modified file, so its data is NOT trusted.
             echo "🚨 repo-analysis.yml was modified - it has been restored to the official version."
             echo "🛑 Skipping this scan; the next run will use the official workflow."
+            echo "app_uninstalled=false" >> "$GITHUB_OUTPUT"
+            echo "skip_scan=true" >> "$GITHUB_OUTPUT"
+          elif [ "$DECISION" = "skip_unchanged" ]; then
+            # Same fingerprint as the last stored scan: re-reading every file
+            # and re-sending identical data would only waste CI minutes,
+            # requests and credits.
+            echo "😴 No changes since the last scan - nothing to analyze."
             echo "app_uninstalled=false" >> "$GITHUB_OUTPUT"
             echo "skip_scan=true" >> "$GITHUB_OUTPUT"
           else
