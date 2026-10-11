@@ -1,3 +1,4 @@
+# workflow-version: 1.0.4-beta
 name: Enhanced Repository Analysis
 
 on:
@@ -25,6 +26,12 @@ jobs:
   analyze:
     runs-on: ubuntu-latest
     permissions:
+      # `write` (not `read`) is required here: if the GitHub App has been
+      # uninstalled (or this repo removed from it), the "Send analysis to
+      # external service" step below gets told to remove this very
+      # workflow file (see the "Remove workflow" step) using this job's
+      # own auto-issued GITHUB_TOKEN - contents:write is what lets that
+      # delete-and-commit call succeed.
       contents: write
       actions: read
     timeout-minutes: 30  # ⏱️ Hard limit for workflow
